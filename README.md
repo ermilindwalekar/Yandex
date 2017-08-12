@@ -1,0 +1,2 @@
+# Yandex
+For Yandex application
