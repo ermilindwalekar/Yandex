@@ -1,0 +1,183 @@
+#include <stdio.h>
+ 
+class Feature
+{
+public:
+    enum FeatureType {eUnknown, eCircle, eTriangle, eSquare};
+ 
+    Feature() : type(eUnknown), points(0) { }
+ 
+    ~Feature()
+    {
+        if (points)       //has no meaning,delete points works good even in case of null pointer
+            delete points;
+    }
+ 
+    bool isValid() 
+    {
+        return type != eUnknown;
+    }
+ 
+    bool read(FILE* file)//FILE structure to a function, it is a structure coming from C
+                        //Better to choose a stream
+    {        
+        if (fread(&type, sizeof(FeatureType), 1, file) != sizeof(FeatureType)) //Reads the data named type
+            return false;
+        short n = 0;
+        switch (type) //Use of runtime polymrphism should have been better rather than defining what happens over a switch case
+        {
+        case eCircle: n = 3; break;
+        case eTriangle: n = 6; break;
+        case eSquare: n = 8; break;
+        default: type = eUnknown; return false;
+        }
+        points = new double[n]; //a std::vector should be more suited here 
+        if (!points)
+            return false;
+        return fread(&points, sizeof(double), n, file) == n*sizeof(double); //tries to read a series of data, but has a bug
+         //Also I don't understand how &points is passed to fread i guess it expects a Pointer to a block of memory
+    }
+    void draw()
+    {
+        switch (type)
+        {
+        case eCircle: drawCircle(points[0], points[1], points[2]); break;
+        case eTriangle: drawPolygon(points, 6); break;
+        case eSquare: drawPolygon(points, 8); break;
+        }
+    }
+ 
+protected:
+    void drawCircle(double centerX, double centerY, double radius);
+    void drawPolygon(double* points, int size);
+ 
+    double* points;
+    FeatureType type;        
+};
+ 
+int main(int argc, char* argv[])  //argc and argv are unused
+{
+    Feature feature;
+    FILE* file = fopen("features.dat", "r");
+    feature.read(file);
+    if (!feature.isValid())
+        return 1;
+    return 0;
+}
+
+
+Well a code that is C language converted to C ++!
+
+Firstly, just by going through with naked eye the functions fopen, fread, fwrite, they are C functions that have nothing to do with C ++.
+Objects dedicated to reading / writing files (and other data streams): fstream, ifstream, ofstream should have been used.
+
+Oh before that, #include<stdio.h>, which is allowing the use of such functions is not recommended to be used in C++ rather C++ file
+handling class and functions should be used as mentioned above.
+
+
+I have marked the possible miskakes in the comments and refactoring the code entirely into C++ below ;)
+
+
+#include <fstream>
+#include <iostream>
+#include <vector>
+
+class Feature {
+public:
+    enum class FeatureType {eUnknown,eCircle,eTriangle,eSquare};
+    Feature(): type(FeatureType::eUnknown), points() //Initializer list
+    {
+    }
+    ~Feature() = default;
+    
+    bool isValid() const
+    {
+        return type != FeatureType::eUnknown;
+    }
+
+    bool read(std::istream& in)
+    {
+        if (!updateTypeFromStream(in)) //function name is self explanatory
+            return false;
+        std::size_t n{};
+        
+        switch (type) { //Polymorphism should have been used but for sake of simplicity using switch
+        case FeatureType::eCircle: //using FQName
+            n = 3;
+            break;
+        case FeatureType::eTriangle:
+            n = 6;
+            break;
+        case FeatureType::eSquare:
+            n = 8;
+            break;
+        default:
+            type = FeatureType::eUnknown;
+            return false;
+        }
+        
+        try {
+            points.resize(n);
+            in.read(reinterpret_cast<char*>(points.data()), sizeof(double) * n); 
+            
+            /*`static_cast` could be used but only `reinterpert_cast` guarantees that if you cast a pointer to a different type,
+            and then reinterpret_cast it back to the original type, you get the original value.*/
+            
+            if (in.gcount() == sizeof(double) * n) {
+                return true;
+            }
+            else {
+                type = FeatureType::eUnknown;
+                return false;
+            }
+        }
+        catch (const std::bad_alloc& e) {
+            std::cout << "Unable to set size " << n << "to vector." << std::endl;
+            return false;
+        }
+    }
+    void draw()
+    {
+        switch (type) {
+        case FeatureType::eCircle:
+            drawCircle(points[0], points[1], points[2]);
+            break;
+        case FeatureType::eTriangle:
+            drawPolygon(points, 6);
+            break;
+        case FeatureType::eSquare:
+            drawPolygon(points, 8);
+            break;
+        }
+    }
+
+protected:
+    virtual void drawCircle(double centerX, double centerY, double radius);
+    virtual void drawPolygon(const std::vector<double>& points, int size);
+
+private:
+    bool updateTypeFromStream(std::istream& in)
+    {
+        in.read(reinterpret_cast<char*>(&type), sizeof(FeatureType));
+        if (in.gcount() == sizeof(FeatureType))
+            return true;
+        else {
+            type = FeatureType::eUnknown;
+            return false;
+        }
+    }
+
+    FeatureType type;
+    std::vector<double> points;
+};
+
+int main(int argc, char* argv[])
+{
+    Feature feature;
+    std::ifstream file{ "features.dat" };
+    if (file.is_open())
+        feature.read(file);
+    if (!feature.isValid())
+        return 1;
+    return 0;
+}
